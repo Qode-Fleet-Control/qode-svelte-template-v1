@@ -1,130 +1,99 @@
-# fleet-template-v1
+# Svelte template
 
-## What This Template Is
+Provisioned from [`Qode-Fleet-Control/fleet-template-v1`](https://github.com/Qode-Fleet-Control/fleet-template-v1) — the fleet
+lifecycle contract (`bin/`, `fleet.conf`, deploy workflows, `compose.yaml`) with a Svelte 5 single-page app in plain JavaScript, compiled by Vite (no SvelteKit) laid on top.
 
-`fleet-template-v1` is a **language-agnostic app lifecycle harness** for apps
-managed by the fleet platform. It gives any app — Node, Python, Go, a Docker
-Compose stack, anything — a uniform way to be deployed and controlled, without
-the fleet needing to know a single thing about your stack.
+Listens on `0.0.0.0:$PORT` (default `3000`) and serves at the root (`/`) of its own hostname
+(`https://<hash>.<FLEET_APP_DOMAIN>/`); the health check hits `/`. In the container: the static build (`dist/`) behind nginx.
 
-The fleet injects runtime variables into the environment (`PORT`, `BASE_PATH`,
-`DATABASE_URL`) and calls `./bin/run` to deploy. Everything project-specific —
-how to install, build, and start your app — lives in **one file: `fleet.conf`**.
-That is the only file you edit per project.
+## Origin
 
-## Repository Structure
+    npm create vite@latest qode-svelte-template-v1 -- --template svelte --no-interactive
 
+Generated 2026-10-05 with create-vite 9.2.1 (host Node v22.12.0 / npm 10.9.0).
+
+## Run it
+
+### On the fleet
+
+The fleet clones the repo, injects `PORT` (and the workspace's `DATABASE_URL`, `REDIS_URL`, ...) and runs
+`bin/run`, which uses the docker runtime from `fleet.conf`: `docker compose build`, then `docker compose up --remove-orphans` in the foreground.
+
+### With docker
+
+    PORT=3000 bin/run                  # what the fleet does
+    docker compose up --build        # or plain compose
+
+### Without docker
+
+`FLEET_RUNTIME=process bin/run` runs the plain commands from `fleet.conf`:
+
+| step | command |
+|---|---|
+| install | `npm install` |
+| build | `npm run build` |
+| start | `npx vite preview --host 0.0.0.0 --port $PORT` |
+
+    ./bin/run       # install, build, start in the foreground
+    ./bin/start     # start from existing build artifacts
+    ./bin/restart   # rebuild and restart
+    ./bin/stop      # stop whatever holds the port
+
+See `docs/fleet-lifecycle.md` for the full contract.
+
+## Deviations from the generator output
+
+- Generator choice: Svelte's own `npx sv create` always produces a SvelteKit app (the fleet already has a SvelteKit template); for plain Svelte the Svelte docs point to Vite's `svelte` template, used here.
+- `vite.config.js` sets `server.allowedHosts` / `preview.allowedHosts` from `FLEET_APP_HOST` (any host when unset): Vite otherwise answers the fleet hostname with "Blocked request" in `vite dev` / `vite preview`.
+- `package-lock.json` added (`npm install --package-lock-only`) so the image build can use `npm ci`.
+- Added the fleet files: `bin/` (lifecycle scripts), `fleet.conf`, `Dockerfile`, `compose.yaml`, `.dockerignore`, `.env.example`, `.github/workflows/`, `docs/fleet-lifecycle.md`; fleet entries (`.fleet/`, `*.log`, ...) prepended to `.gitignore`.
+
+## Verified
+
+**Not yet verified in docker.** On 2026-10-05 the shared docker host's disk stayed at 0-2 GB free for over 3 hours (held by other workloads), so the image was never built; `verify.sh` / `docker compose run` must still be run before this is trusted. `migrate.py audit`: READY.
+
+---
+
+# Svelte + Vite
+
+This template should help get you started developing with Svelte in Vite.
+
+## Recommended IDE Setup
+
+[VS Code](https://code.visualstudio.com/) + [Svelte](https://marketplace.visualstudio.com/items?itemName=svelte.svelte-vscode).
+
+## Need an official Svelte framework?
+
+Check out [SvelteKit](https://github.com/sveltejs/kit#readme), which is also powered by Vite. Deploy anywhere with its serverless-first approach and adapt to various platforms, with out of the box support for TypeScript, SCSS, and Less, and easily-added support for mdsvex, GraphQL, PostCSS, Tailwind CSS, and more.
+
+## Technical considerations
+
+**Why use this over SvelteKit?**
+
+- It brings its own routing solution which might not be preferable for some users.
+- It is first and foremost a framework that just happens to use Vite under the hood, not a Vite app.
+
+This template contains as little as possible to get started with Vite + Svelte, while taking into account the developer experience with regards to HMR and intellisense. It demonstrates capabilities on par with the other `create-vite` templates and is a good starting point for beginners dipping their toes into a Vite + Svelte project.
+
+Should you later need the extended capabilities and extensibility provided by SvelteKit, the template has been structured similarly to SvelteKit so that it is easy to migrate.
+
+**Why include `.vscode/extensions.json`?**
+
+Other templates indirectly recommend extensions via the README, but this file allows VS Code to prompt the user to install the recommended extension upon opening the project.
+
+**Why enable `checkJs` in the JS template?**
+
+It is likely that most cases of changing variable types in runtime are likely to be accidental, rather than deliberate. This provides advanced typechecking out of the box. Should you like to take advantage of the dynamically-typed nature of JavaScript, it is trivial to change the configuration.
+
+**Why is HMR not preserving my local component state?**
+
+HMR state preservation comes with a number of gotchas! It has been disabled by default in both `svelte-hmr` and `@sveltejs/vite-plugin-svelte` due to its often surprising behavior. You can read the details [here](https://github.com/sveltejs/svelte-hmr/tree/master/packages/svelte-hmr#preservation-of-local-state).
+
+If you have state that's important to retain within a component, consider creating an external store which would not be replaced by HMR.
+
+```js
+// store.js
+// An extremely simple external store
+import { writable } from 'svelte/store'
+export default writable(0)
 ```
-fleet.conf        ← the only file you edit per project
-.env              ← local-only env vars (gitignored)
-bin/
-  _common.sh      ← shared logic; never edit this
-  run             ← install + build + start (called by the fleet)
-  start           ← start only (no rebuild)
-  restart         ← stop + full run
-  reload          ← hot-reload config without rebuild
-  stop            ← stop the running process
-```
-
-## The One File You Edit: `fleet.conf`
-
-`fleet.conf` is sourced as shell by the lifecycle scripts. Fill in the commands
-for your stack; leave any command empty (`''`) to skip that step.
-
-```sh
-NAME="my-app"           # label shown in fleet logs
-PORT="3000"             # default port (fleet overrides via $PORT env var)
-HEALTH_PATH="/"         # HTTP path that returns 200 when the app is ready
-
-INSTALL_CMD='npm ci'
-BUILD_CMD='npm run build'
-START_CMD='node dist/server.js'   # must listen on $PORT; run in foreground
-RELOAD_CMD=''           # optional; empty → falls back to stop+start
-```
-
-> **Critical rule:** single-quote any command that uses `$PORT` or
-> `$BASE_PATH`. Single quotes defer variable expansion to **runtime** — when the
-> command actually runs, with the fleet-injected value — rather than at the
-> moment `fleet.conf` is sourced (when those values aren't set yet). Use
-> `START_CMD='gunicorn app:app --bind 0.0.0.0:$PORT'`, never double quotes.
-
-## How the Lifecycle Works
-
-| Script | What it does | When to use |
-| --- | --- | --- |
-| `bin/run` | `INSTALL_CMD` → `BUILD_CMD` → `START_CMD` | Fleet deploy, fresh start |
-| `bin/start` | `START_CMD` only | Restart without rebuild |
-| `bin/restart` | stop + `bin/run` | After a code/dep change |
-| `bin/reload` | `RELOAD_CMD`, or stop+start if empty | After a config-only change |
-| `bin/stop` | Kill by pidfile or port | Tear down |
-
-> The process PID is written to `.fleet/app.pid` so subsequent `stop`/`restart`
-> calls can find and terminate it reliably. If the pidfile is missing or stale,
-> `stop` falls back to freeing whatever is listening on `$PORT`.
-
-## How to Apply This to Your Project
-
-### Step 1 — Copy the template into your repo
-
-```sh
-cp -r fleet-template-v1/* my-project/
-```
-
-Or, if starting fresh, just clone it and work from `main`.
-
-### Step 2 — Edit `fleet.conf` (the only required change)
-
-Fill in your stack's commands. Per-stack examples:
-
-```sh
-# Node.js
-INSTALL_CMD='npm ci'
-BUILD_CMD='npm run build'
-START_CMD='node dist/index.js'
-
-# Python (Gunicorn)
-INSTALL_CMD='pip install -r requirements.txt'
-BUILD_CMD=''
-START_CMD='gunicorn app:app --bind 0.0.0.0:$PORT'
-
-# Go
-INSTALL_CMD=''
-BUILD_CMD='go build -o ./out/server ./cmd/server'
-START_CMD='./out/server'
-
-# Docker Compose
-INSTALL_CMD=''
-BUILD_CMD='docker compose build'
-START_CMD='docker compose up'
-RELOAD_CMD='docker compose up -d --no-build'
-```
-
-### Step 3 — Set local env vars in `.env` (gitignored)
-
-```sh
-APP_NAME=My App
-DATABASE_URL=postgres://localhost/mydb
-```
-
-### Step 4 — Verify standalone
-
-```sh
-PORT=3001 bin/run      # should install, build, and serve on 3001
-curl http://localhost:3001/   # should 200
-```
-
-### Step 5 — Connect to the fleet
-
-Point the fleet at your repo. It will clone it, inject `PORT` / `BASE_PATH` /
-`DATABASE_URL`, and call `bin/run`. As long as your `START_CMD` listens on
-`$PORT` and `HEALTH_PATH` returns 200, the fleet will mark the app healthy.
-
-## Key Invariants
-
-- **`START_CMD` must run in the foreground and listen on `$PORT`.** Do not use a
-  dev server — HMR / hot-reload chunks 404 behind the ingress and will break the
-  app.
-- **Never put secrets in `fleet.conf`** — it's committed. Use `.env` locally;
-  the fleet injects secrets via the environment.
-- **`bin/_common.sh` is shared infrastructure** — don't edit it per project. All
-  project-specific configuration belongs in `fleet.conf`.
